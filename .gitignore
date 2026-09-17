@@ -1,0 +1,48 @@
+# Node / frontend
+node_modules/
+dist/
+dist-ssr/
+*.local
+.vite/
+
+# Rust / Tauri
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# Secrets. Recap Studio keeps API keys in the OS config folder, not here,
+# but keep this in place so a stray .env never gets committed.
+.env
+.env.*
+!.env.example
+
+# Source material and generated projects
+naruto/
+one-piece/
+vinland-saga/
+solo-leveling/
+hunter/
+golden/
+berserk/
+projects/
+
+# Legacy Python pipeline
+__pycache__/
+venv/
+.venv/
+.ipynb_checkpoints/
+*.pyc
+
+# Model checkpoints. The CRAFT text-detector weights are 79 MB and the default
+# code path never loaded them. Re-download from the CRAFT project if you want to
+# run the old Python text detector.
+*.pth
+*.pt
+*.onnx
+*.safetensors
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local panel-detection fixture, not redistributed
+src-tauri/tests/fixtures/
