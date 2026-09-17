@@ -57,6 +57,14 @@ Long chapters are narrated in segments of a few pages each, every segment runnin
 at the full output-token allowance and carrying the story so far. That is what
 stops an output limit from quietly forcing the model to merge panels to fit.
 
+**All of it is editable.** The Engine tab in the narration screen holds the
+narrator prompt and the delivery rules as text you can rewrite, with the shipped
+version one click away if an experiment goes wrong. Edits are stored per install
+and apply to the next narration; scripts already generated are left alone. If a
+rewritten delivery text drops the `[[page:panel]]` tags, the app says so before
+you run it, because coverage checking and the storyboard are both built from
+them.
+
 **5. Check it against the prompt.** Every narration is checked mechanically
 before you read a word of it:
 
@@ -73,6 +81,10 @@ before you read a word of it:
 - no semicolons
 - each panel's narration runs as one unbroken block
 - sentences short enough to say aloud at a natural pace
+
+Each of these can be switched off individually in the Engine tab. A check that
+is off is left out of the report and out of the score rather than shown as
+passing, so the number always reflects what you actually asked for.
 
 Plus a **grounding pass**: an AI check that flags any sentence asserting an event
 the panel record does not support, so an expressive retelling never turns into an

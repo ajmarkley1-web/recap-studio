@@ -207,6 +207,18 @@ pub struct Settings {
     #[serde(default = "default_max_output_tokens")]
     pub max_output_tokens: u32,
 
+    /// The user's own narrator prompt. Empty means "use the shipped one", so a
+    /// fresh install and a user who has reset their edit look identical.
+    #[serde(default)]
+    pub narrator_prompt: String,
+    /// The user's own delivery contract. Empty means the shipped one.
+    #[serde(default)]
+    pub delivery_contract: String,
+    /// Ids of mechanical checks the user has switched off. A disabled check is
+    /// left out of the report entirely rather than shown as passing.
+    #[serde(default)]
+    pub disabled_rules: Vec<String>,
+
     #[serde(default)]
     pub tts: TtsSettings,
     #[serde(default)]
@@ -264,6 +276,9 @@ impl Default for Settings {
             grounding_check: true,
             pages_per_narration: default_pages_per_narration(),
             max_output_tokens: default_max_output_tokens(),
+            narrator_prompt: String::new(),
+            delivery_contract: String::new(),
+            disabled_rules: Vec::new(),
             tts: TtsSettings::default(),
             video: VideoSettings::default(),
             projects_root: None,
@@ -314,6 +329,30 @@ impl Settings {
         }
         let client = self.client(choice.provider)?;
         Ok((client, choice.model))
+    }
+
+    /// The narrator prompt actually sent: the user's, or the shipped default
+    /// when they have not written one. A prompt of pure whitespace counts as
+    /// unset, so the engine can never be handed an empty system prompt.
+    pub fn narrator_prompt(&self) -> &str {
+        if self.narrator_prompt.trim().is_empty() {
+            crate::narrator::NARRATOR_PROMPT
+        } else {
+            &self.narrator_prompt
+        }
+    }
+
+    /// The delivery contract actually sent, same fallback.
+    pub fn delivery_contract(&self) -> &str {
+        if self.delivery_contract.trim().is_empty() {
+            crate::narrator::DELIVERY_CONTRACT
+        } else {
+            &self.delivery_contract
+        }
+    }
+
+    pub fn rule_is_enabled(&self, id: &str) -> bool {
+        !self.disabled_rules.iter().any(|d| d == id)
     }
 
     /// True when at least one provider is usable.

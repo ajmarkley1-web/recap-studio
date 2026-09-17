@@ -14,7 +14,10 @@ use crate::model::PanelRef;
 use once_cell::sync::Lazy;
 use regex::Regex;
 
-/// THE NARRATOR PROMPT. Verbatim. Do not paraphrase it.
+/// THE NARRATOR PROMPT, as shipped. Verbatim. Do not paraphrase it.
+///
+/// This is the default. A user who edits the prompt in the app overrides it,
+/// and `Settings::narrator_prompt` is what the engine actually sends.
 pub const NARRATOR_PROMPT: &str = r#"You are a master manga narrator. Given sequential manga or manhwa pages, write a 3rd-person narrative that captures the full story in a natural prose style — like a light novel or dramatic short story.
 
 Do not describe visual elements like panels, angles, or framing. Avoid cinematic or viewer-based terms (e.g., "camera zooms," "scene shifts," "we see," "in this panel"). Instead, describe the events as if you were telling a story to someone blindfolded.
@@ -45,6 +48,16 @@ It is written to be read aloud, so the punctuation stays simple. No em-dashes an
 Narration for a panel is at least a couple of full sentences, and as many as the moment needs. A panel that only shows a character's face still has a reaction, a thought and a feeling to narrate. A panel with no dialogue still has a beat of tension, hesitation or atmosphere to carry.
 
 Write it to be read aloud. Do not open with a preamble or close with a sign-off, a summary of what just happened, or any address to the audience. Begin at the first tag and end at the last one."#;
+
+/// Does this delivery contract still tell the model to tag panels?
+///
+/// The tags are what make coverage checkable and what the storyboard is built
+/// from, so a custom contract that drops them silently disables both. The app
+/// warns on this rather than refusing the edit.
+pub fn mentions_panel_tags(delivery: &str) -> bool {
+    let lowered = delivery.to_ascii_lowercase();
+    lowered.contains("[[page:panel]]") || (lowered.contains("[[") && lowered.contains("tag"))
+}
 
 /// Marker the model writes before each panel's narration: `[[page:panel]]`.
 static MARKER: Lazy<Regex> =
@@ -139,6 +152,7 @@ pub fn join_with_markers(panels: &[NarratedPanel]) -> String {
 /// panel-by-panel record of the pages being narrated.
 pub fn narration_user(
     reading_hint: &str,
+    delivery: &str,
     work: &str,
     cast: &str,
     story_so_far: &str,
@@ -166,7 +180,7 @@ pub fn narration_user(
 {series}{who}
 {context}
 
-{DELIVERY_CONTRACT}
+{delivery}
 
 Here is the record of what is on the pages, panel by panel, already in reading order. Every line beginning with a tag is one panel. Dialogue is transcribed as it was read off the page, so work from it but do not quote it back.
 
@@ -221,6 +235,18 @@ mod tests {
         let parts = split_by_marker("[[ 12 . 4 ]] The door gives way.");
         assert_eq!(parts.len(), 1);
         assert_eq!(parts[0].panel, PanelRef { page: 12, panel: 4 });
+    }
+
+    #[test]
+    fn the_shipped_contract_asks_for_panel_tags() {
+        assert!(mentions_panel_tags(DELIVERY_CONTRACT));
+    }
+
+    #[test]
+    fn a_contract_that_drops_the_tags_is_flagged() {
+        assert!(!mentions_panel_tags(
+            "Write it as one flowing story. No headers and no bullets."
+        ));
     }
 
     #[test]

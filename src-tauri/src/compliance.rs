@@ -234,9 +234,30 @@ fn find_lines_with(text: &str, re: &Regex, limit: usize) -> Vec<String> {
     out
 }
 
+/// Every check this module can run, in report order. The app shows these so a
+/// user can switch individual ones off.
+pub const RULE_IDS: &[(&str, &str)] = &[
+    ("panel_coverage", "Every panel narrated"),
+    ("panel_order", "Panels narrated in reading order"),
+    ("panel_depth", "No panel compressed to a clause"),
+    ("panel_tags", "Panel tags resolve"),
+    ("no_visual_terms", "No panels, angles or framing described"),
+    ("no_viewer_terms", "Third person, no viewer-based terms"),
+    ("dialogue_embedded", "Dialogue embedded, not in quotes"),
+    ("prose_only", "Prose only, no headers, bullets or labels"),
+    ("no_sign_off", "No preamble, sign-off or closing summary"),
+    ("no_em_dash", "No em-dashes"),
+    ("no_semicolon", "No semicolons"),
+    ("single_block", "Single flowing block"),
+    ("spoken_cadence", "Sounds spoken, not written"),
+    ("narration_length", "Full, immersive length"),
+];
+
 /// Run every mechanical check. `script` is the reading copy, with the panel tags
-/// already stripped; `coverage` is measured from the tagged copy.
-pub fn check(script: &str, coverage: &Coverage) -> ComplianceReport {
+/// already stripped; `coverage` is measured from the tagged copy. Checks whose
+/// id is in `disabled` are left out of the report and out of the score, so
+/// switching one off cannot quietly cost points.
+pub fn check(script: &str, coverage: &Coverage, disabled: &[String]) -> ComplianceReport {
     let text = script.trim();
     let mut checks: Vec<Check> = Vec::new();
 
@@ -566,6 +587,9 @@ pub fn check(script: &str, coverage: &Coverage) -> ComplianceReport {
         )
     });
 
+    // --- Drop what the user switched off ------------------------------------
+    checks.retain(|c| !disabled.iter().any(|d| d == c.id));
+
     // --- Score --------------------------------------------------------------
     let total_weight: u32 = checks.iter().map(|c| c.weight).sum();
     let lost: u32 = checks
@@ -659,7 +683,7 @@ mod tests {
         let expected = vec![panel(0, 0), panel(0, 1), panel(0, 2)];
         let coverage = Coverage::measure(&expected, &narrated(&[(0, 0), (0, 2)], 30));
         assert_eq!(coverage.missing, vec![panel(0, 1)]);
-        let report = check("word ".repeat(60).as_str(), &coverage);
+        let report = check("word ".repeat(60).as_str(), &coverage, &[]);
         assert_eq!(status_of(&report, "panel_coverage"), RuleStatus::Fail);
     }
 
@@ -668,7 +692,7 @@ mod tests {
         let expected = vec![panel(0, 0), panel(0, 1), panel(1, 0)];
         let coverage = Coverage::measure(&expected, &narrated(&[(0, 0), (0, 1), (1, 0)], 30));
         assert!(coverage.is_complete());
-        let report = check(&"word ".repeat(90), &coverage);
+        let report = check(&"word ".repeat(90), &coverage, &[]);
         assert_eq!(status_of(&report, "panel_coverage"), RuleStatus::Pass);
         assert_eq!(status_of(&report, "panel_order"), RuleStatus::Pass);
     }
@@ -677,7 +701,7 @@ mod tests {
     fn panels_narrated_backwards_fail_the_order_check() {
         let expected = vec![panel(0, 0), panel(0, 1)];
         let coverage = Coverage::measure(&expected, &narrated(&[(0, 1), (0, 0)], 30));
-        let report = check(&"word ".repeat(60), &coverage);
+        let report = check(&"word ".repeat(60), &coverage, &[]);
         assert_eq!(status_of(&report, "panel_order"), RuleStatus::Fail);
     }
 
@@ -686,7 +710,7 @@ mod tests {
         let expected = vec![panel(0, 0), panel(0, 1)];
         let coverage = Coverage::measure(&expected, &narrated(&[(0, 0), (0, 1)], 4));
         assert_eq!(coverage.thin.len(), 2);
-        let report = check(&"word ".repeat(8), &coverage);
+        let report = check(&"word ".repeat(8), &coverage, &[]);
         assert_eq!(status_of(&report, "panel_depth"), RuleStatus::Fail);
     }
 
@@ -695,6 +719,7 @@ mod tests {
         let report = check(
             "In this panel he turns around. The camera zooms in on the blade.",
             &Coverage::default(),
+            &[],
         );
         assert_eq!(status_of(&report, "no_visual_terms"), RuleStatus::Fail);
     }
@@ -704,6 +729,7 @@ mod tests {
         let report = check(
             "We see him step through the door. The reader already knows what waits inside.",
             &Coverage::default(),
+            &[],
         );
         assert_eq!(status_of(&report, "no_viewer_terms"), RuleStatus::Fail);
     }
@@ -713,6 +739,7 @@ mod tests {
         let report = check(
             "He looked up at her and said \"I am never going back there again\" before leaving.",
             &Coverage::default(),
+            &[],
         );
         assert_eq!(status_of(&report, "dialogue_embedded"), RuleStatus::Fail);
     }
@@ -722,6 +749,7 @@ mod tests {
         let report = check(
             "He looked up at her and told her, flatly, that he was never going back there again, and then he left without waiting for an answer.",
             &Coverage::default(),
+            &[],
         );
         assert_eq!(status_of(&report, "dialogue_embedded"), RuleStatus::Pass);
     }
@@ -735,7 +763,7 @@ mod tests {
                       move through him without flinching. The ache in his shoulder had \
                       gone quiet, which frightened him more than the pain had. Somewhere \
                       below, a door closed. Slowly, deliberately, he began to count.";
-        let report = check(script, &Coverage::default());
+        let report = check(script, &Coverage::default(), &[]);
         let failures: Vec<&str> = report
             .rules
             .iter()
@@ -750,6 +778,7 @@ mod tests {
         let report = check(
             "He walks away from the ruin. Thanks for watching, see you next time.",
             &Coverage::default(),
+            &[],
         );
         assert_eq!(status_of(&report, "no_sign_off"), RuleStatus::Fail);
     }
@@ -759,6 +788,7 @@ mod tests {
         let report = check(
             "He runs on into the dark — fast; and he does not once look back.",
             &Coverage::default(),
+            &[],
         );
         assert_eq!(status_of(&report, "no_em_dash"), RuleStatus::Fail);
         assert_eq!(status_of(&report, "no_semicolon"), RuleStatus::Fail);
@@ -767,7 +797,7 @@ mod tests {
     #[test]
     fn an_en_dash_and_a_double_hyphen_count_as_em_dashes() {
         for sample in ["He waits – then moves.", "He waits -- then moves."] {
-            let report = check(sample, &Coverage::default());
+            let report = check(sample, &Coverage::default(), &[]);
             assert_eq!(
                 status_of(&report, "no_em_dash"),
                 RuleStatus::Fail,
@@ -787,7 +817,7 @@ mod tests {
         }];
         let coverage = Coverage::measure(&expected, &narrated);
         assert_eq!(coverage.split, vec![panel(0, 0)]);
-        let report = check("He steps to the ledge.", &coverage);
+        let report = check("He steps to the ledge.", &coverage, &[]);
         assert_eq!(status_of(&report, "single_block"), RuleStatus::Fail);
     }
 
@@ -797,14 +827,14 @@ mod tests {
         let expected = vec![panel(0, 0), panel(0, 1)];
         let coverage = Coverage::measure(&expected, &narrated(&[(0, 0), (0, 1)], 30));
         assert!(coverage.split.is_empty());
-        let report = check("He wakes in the dark.\n\nHe runs for the door.", &coverage);
+        let report = check("He wakes in the dark.\n\nHe runs for the door.", &coverage, &[]);
         assert_eq!(status_of(&report, "single_block"), RuleStatus::Pass);
     }
 
     #[test]
     fn a_sentence_too_long_to_say_aloud_fails() {
         let long = format!("He {} ran.", "slowly and ".repeat(20));
-        let report = check(&long, &Coverage::default());
+        let report = check(&long, &Coverage::default(), &[]);
         assert_eq!(status_of(&report, "spoken_cadence"), RuleStatus::Fail);
     }
 
@@ -813,13 +843,47 @@ mod tests {
         let report = check(
             "He wakes in the dark. The room is not his. He does not move for a long moment.",
             &Coverage::default(),
+            &[],
         );
         assert_eq!(status_of(&report, "spoken_cadence"), RuleStatus::Pass);
     }
 
     #[test]
+    fn a_disabled_rule_leaves_the_report_entirely() {
+        let script = "He runs on into the dark — fast; and he does not look back.";
+        let on = check(script, &Coverage::default(), &[]);
+        assert_eq!(status_of(&on, "no_em_dash"), RuleStatus::Fail);
+
+        let off = check(
+            script,
+            &Coverage::default(),
+            &["no_em_dash".to_string(), "no_semicolon".to_string()],
+        );
+        assert!(!off.rules.iter().any(|r| r.id == "no_em_dash"));
+        assert!(!off.rules.iter().any(|r| r.id == "no_semicolon"));
+        // And the score must not be dragged down by a rule that was switched off.
+        assert!(off.score > on.score, "{} vs {}", off.score, on.score);
+    }
+
+    #[test]
+    fn every_advertised_rule_id_can_actually_fire() {
+        // RULE_IDS drives the settings UI, so a typo there would show the user a
+        // toggle that controls nothing.
+        let report = check("He walks.", &Coverage::default(), &[]);
+        for (id, _) in RULE_IDS {
+            if *id == "panel_tags" {
+                continue; // only added when a tag points outside the scope
+            }
+            assert!(
+                report.rules.iter().any(|r| r.id == *id),
+                "RULE_IDS advertises \"{id}\" but check() never emits it"
+            );
+        }
+    }
+
+    #[test]
     fn a_leftover_tag_is_caught() {
-        let report = check("[[0:1]] He turns the corner.", &Coverage::default());
+        let report = check("[[0:1]] He turns the corner.", &Coverage::default(), &[]);
         assert_eq!(status_of(&report, "prose_only"), RuleStatus::Fail);
     }
 }

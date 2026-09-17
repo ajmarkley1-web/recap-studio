@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api";
 import { useStore } from "../lib/store";
 import {
@@ -225,7 +225,7 @@ export function ScriptStudio() {
                 className={`tab${tab === "prompt" ? " active" : ""}`}
                 onClick={() => setTab("prompt")}
               >
-                The prompt
+                Engine
               </button>
             </div>
 
@@ -416,76 +416,231 @@ export function ScriptStudio() {
 }
 
 function PromptView() {
-  const [prompt, setPrompt] = useState<NarratorPromptView | null>(null);
+  const [engine, setEngine] = useState<NarratorPromptView | null>(null);
+  const [prompt, setPrompt] = useState("");
+  const [delivery, setDelivery] = useState("");
+  const [saving, setSaving] = useState(false);
+  const settings = useStore((s) => s.settings);
+  const setSettings = useStore((s) => s.setSettings);
+  const toast = useStore((s) => s.toast);
   const notifyError = useStore((s) => s.notifyError);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     api
       .narratorPrompt()
-      .then(setPrompt)
-      .catch((err) => notifyError(err, "Could not load the prompt"));
+      .then((e) => {
+        setEngine(e);
+        setPrompt(e.prompt);
+        setDelivery(e.delivery);
+      })
+      .catch((err) => notifyError(err, "Could not load the engine"));
   }, [notifyError]);
 
-  const blocks = prompt
-    ? [
-        {
-          title: "The narrator prompt",
-          subtitle: "Sent as the system prompt on every pass. Nothing else.",
-          body: prompt.prompt,
-        },
-        {
-          title: "Delivery",
-          subtitle:
-            "Sent with the panel record. It pins the narration to the panels, and adds nothing to the voice.",
-          body: prompt.delivery,
-        },
-      ]
-    : [];
+  useEffect(load, [load]);
+
+  const dirty =
+    !!engine && (prompt !== engine.prompt || delivery !== engine.delivery);
+
+  // An empty box means "use the shipped text", which is also how a reset is
+  // stored, so the two paths cannot drift apart.
+  async function persist(nextPrompt: string, nextDelivery: string) {
+    if (!settings) return;
+    setSaving(true);
+    try {
+      const isDefault = (v: string, d: string) => v.trim() === d.trim();
+      const updated = await api.saveSettings({
+        ...settings,
+        narrator_prompt:
+          engine && isDefault(nextPrompt, engine.default_prompt) ? "" : nextPrompt,
+        delivery_contract:
+          engine && isDefault(nextDelivery, engine.default_delivery)
+            ? ""
+            : nextDelivery,
+      });
+      setSettings(updated);
+      load();
+      toast({
+        tone: "success",
+        title: "Engine saved",
+        body: "The next narration uses it. Existing scripts are unchanged.",
+      });
+    } catch (err) {
+      notifyError(err, "Could not save the engine");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function toggleRule(id: string, enabled: boolean) {
+    if (!settings || !engine) return;
+    const next = enabled
+      ? engine.disabled_rules.filter((r) => r !== id)
+      : [...engine.disabled_rules, id];
+    try {
+      const updated = await api.saveSettings({ ...settings, disabled_rules: next });
+      setSettings(updated);
+      load();
+    } catch (err) {
+      notifyError(err, "Could not change that rule");
+    }
+  }
+
+  if (!engine) return <p className="card-sub">Loading the engine...</p>;
 
   return (
     <>
       <p className="card-sub">
-        This is the whole engine. One prompt, verbatim, plus the delivery rules
-        that keep every panel in order.
+        This is the whole engine, and all of it is yours to change. Edits apply
+        to the next narration you generate.
       </p>
-      <div className="col" style={{ gap: 8 }}>
-        {blocks.map((block) => (
-          <div
-            key={block.title}
-            style={{
-              border: "1px solid var(--border)",
-              borderRadius: "var(--radius)",
-              overflow: "hidden",
+
+      {!engine.delivery_keeps_panel_tags && (
+        <div className="banner bad mb">
+          <Icon name="alert" size={15} />
+          <div style={{ minWidth: 0 }}>
+            <strong>The delivery rules no longer ask for panel tags</strong>
+            <span className="small">
+              Coverage checking and the storyboard are both built from{" "}
+              <code>[[page:panel]]</code> tags. Without them the next narration
+              reports every panel as skipped and the storyboard falls back to
+              splitting on sentences.
+            </span>
+          </div>
+        </div>
+      )}
+
+      <PromptBox
+        title="The narrator prompt"
+        subtitle="Sent as the system prompt on every pass. This is the voice."
+        value={prompt}
+        onChange={setPrompt}
+        isCustom={engine.prompt_is_custom}
+        onReset={() => {
+          setPrompt(engine.default_prompt);
+          void persist(engine.default_prompt, delivery);
+        }}
+        rows={14}
+      />
+
+      <PromptBox
+        title="Delivery rules"
+        subtitle="Sent with the panel record. This is what pins narration to panels and sets the output rules."
+        value={delivery}
+        onChange={setDelivery}
+        isCustom={engine.delivery_is_custom}
+        onReset={() => {
+          setDelivery(engine.default_delivery);
+          void persist(prompt, engine.default_delivery);
+        }}
+        rows={14}
+      />
+
+      <div className="row mt">
+        <button
+          className="btn primary"
+          disabled={!dirty || saving}
+          onClick={() => void persist(prompt, delivery)}
+        >
+          <Icon name="check" size={14} />
+          {saving ? "Saving" : "Save engine"}
+        </button>
+        {dirty && (
+          <button
+            className="btn ghost"
+            onClick={() => {
+              setPrompt(engine.prompt);
+              setDelivery(engine.delivery);
             }}
           >
-            <div
-              className="row"
-              style={{ background: "var(--surface-2)", padding: "10px 12px" }}
-            >
-              <span style={{ flex: 1, minWidth: 0 }}>
-                <strong className="small">{block.title}</strong>
-                <div className="small faint">{block.subtitle}</div>
+            Discard changes
+          </button>
+        )}
+      </div>
+
+      <div className="card-head mt" style={{ marginBottom: 4 }}>
+        <h2 style={{ fontSize: 15 }}>Mechanical checks</h2>
+      </div>
+      <p className="field-hint" style={{ marginTop: 0 }}>
+        Switched off means left out of the report and out of the score, not
+        shown as passing.
+      </p>
+      <div className="col" style={{ gap: 2 }}>
+        {engine.rules.map(([id, label]) => {
+          const enabled = !engine.disabled_rules.includes(id);
+          return (
+            <label key={id} className="check">
+              <input
+                type="checkbox"
+                checked={enabled}
+                onChange={(e) => void toggleRule(id, e.target.checked)}
+              />
+              <span className="check-body">
+                <strong>{label}</strong>
               </span>
-            </div>
-            <pre
-              style={{
-                margin: 0,
-                padding: "12px 14px",
-                whiteSpace: "pre-wrap",
-                fontSize: 12.5,
-                lineHeight: 1.65,
-                fontFamily: "var(--font)",
-                color: "var(--text-dim)",
-                maxHeight: 420,
-                overflowY: "auto",
-              }}
-            >
-              {block.body}
-            </pre>
-          </div>
-        ))}
+            </label>
+          );
+        })}
       </div>
     </>
+  );
+}
+
+function PromptBox({
+  title,
+  subtitle,
+  value,
+  onChange,
+  isCustom,
+  onReset,
+  rows,
+}: {
+  title: string;
+  subtitle: string;
+  value: string;
+  onChange: (v: string) => void;
+  isCustom: boolean;
+  onReset: () => void;
+  rows: number;
+}) {
+  return (
+    <div
+      style={{
+        border: "1px solid var(--border)",
+        borderRadius: "var(--radius)",
+        overflow: "hidden",
+        marginBottom: 10,
+      }}
+    >
+      <div
+        className="row"
+        style={{ background: "var(--surface-2)", padding: "10px 12px" }}
+      >
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <strong className="small">{title}</strong>
+          <div className="small faint">{subtitle}</div>
+        </span>
+        {isCustom && <span className="pill amber">edited</span>}
+        {isCustom && (
+          <button className="btn sm ghost" onClick={onReset}>
+            Reset to default
+          </button>
+        )}
+      </div>
+      <textarea
+        value={value}
+        rows={rows}
+        onChange={(e) => onChange(e.target.value)}
+        style={{
+          width: "100%",
+          border: 0,
+          borderRadius: 0,
+          resize: "vertical",
+          fontSize: 12.5,
+          lineHeight: 1.65,
+          padding: "12px 14px",
+        }}
+      />
+    </div>
   );
 }
 

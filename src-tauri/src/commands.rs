@@ -489,18 +489,42 @@ pub async fn analyze_project(
 // Scripts
 // ---------------------------------------------------------------------------
 
-/// The prompt, exactly as the model receives it, for the Prompt tab in the UI.
+/// The engine as the UI needs to show it: what will actually be sent, what the
+/// shipped defaults are so an edit can be reverted, and which checks exist.
 #[derive(serde::Serialize)]
 pub struct NarratorPromptView {
+    /// What the model will receive, user's edit or shipped default.
     pub prompt: String,
     pub delivery: String,
+    /// The shipped text, for the reset button and for diffing against.
+    pub default_prompt: String,
+    pub default_delivery: String,
+    pub prompt_is_custom: bool,
+    pub delivery_is_custom: bool,
+    /// False when a custom contract has dropped the panel tags, which silently
+    /// disables coverage checking and the storyboard.
+    pub delivery_keeps_panel_tags: bool,
+    /// Every mechanical check: (id, label).
+    pub rules: Vec<(String, String)>,
+    pub disabled_rules: Vec<String>,
 }
 
 #[tauri::command]
-pub fn narrator_prompt() -> NarratorPromptView {
+pub fn narrator_prompt(state: State<'_, AppState>) -> NarratorPromptView {
+    let settings = state.snapshot();
     NarratorPromptView {
-        prompt: narrator::NARRATOR_PROMPT.to_string(),
-        delivery: narrator::DELIVERY_CONTRACT.to_string(),
+        prompt: settings.narrator_prompt().to_string(),
+        delivery: settings.delivery_contract().to_string(),
+        default_prompt: narrator::NARRATOR_PROMPT.to_string(),
+        default_delivery: narrator::DELIVERY_CONTRACT.to_string(),
+        prompt_is_custom: !settings.narrator_prompt.trim().is_empty(),
+        delivery_is_custom: !settings.delivery_contract.trim().is_empty(),
+        delivery_keeps_panel_tags: narrator::mentions_panel_tags(settings.delivery_contract()),
+        rules: crate::compliance::RULE_IDS
+            .iter()
+            .map(|(id, label)| (id.to_string(), label.to_string()))
+            .collect(),
+        disabled_rules: settings.disabled_rules.clone(),
     }
 }
 
@@ -604,6 +628,7 @@ pub async fn auto_fix_script(
 /// Save a hand-edited script, then re-run the mechanical checks on it.
 #[tauri::command]
 pub fn update_script_text(
+    state: State<'_, AppState>,
     root: String,
     scope: ScriptScope,
     text: String,
@@ -621,7 +646,9 @@ pub fn update_script_text(
     let narrated = narrator::split_by_marker(&updated.tagged_script);
     let coverage = crate::compliance::Coverage::measure(&expected, &narrated);
     // A manual edit invalidates the old grounding result rather than keeping a stale one.
-    let mut report = crate::compliance::check(&updated.final_script, &coverage);
+    let settings = state.snapshot();
+    let mut report =
+        crate::compliance::check(&updated.final_script, &coverage, &settings.disabled_rules);
     report.grounding = None;
     updated.compliance = Some(report);
 

@@ -295,6 +295,7 @@ async fn narrate_segment(
 
     let user = narrator::narration_user(
         prompts::reading_order_hint(project.source.format),
+        settings.delivery_contract(),
         &work_blob(project),
         &cast_blob(project),
         &util::truncate(&story_so_far(project, first_page, written_so_far), 8_000),
@@ -305,7 +306,7 @@ async fn narrate_segment(
     ask_text(
         &client,
         &model,
-        narrator::NARRATOR_PROMPT,
+        settings.narrator_prompt(),
         vec![ChatMessage::user_text(user)],
         settings.max_output_tokens,
         0.75,
@@ -327,6 +328,13 @@ pub async fn generate(
 
     let label = scope_label(project, &scope);
     let writer_model = settings.choice_for(ModelRole::Writer).model;
+
+    if !narrator::mentions_panel_tags(settings.delivery_contract()) {
+        emitter.warn(
+            "The delivery rules no longer ask for [[page:panel]] tags. Panel coverage \
+             and the storyboard both depend on them, so both will come back empty.",
+        );
+    }
 
     // The page records are borrowed out of the project, so the token ledger is
     // written once the narration is done rather than during it.
@@ -539,7 +547,7 @@ pub async fn check_compliance(
     let expected = panels_in_scope(project, scope);
     let narrated = narrator::split_by_marker(&bundle.tagged_script);
     let coverage = Coverage::measure(&expected, &narrated);
-    let mut report = compliance::check(&bundle.final_script, &coverage);
+    let mut report = compliance::check(&bundle.final_script, &coverage, &settings.disabled_rules);
 
     if run_grounding && !bundle.final_script.trim().is_empty() {
         emitter.stage("grounding", "Checking every sentence against the source");
@@ -639,8 +647,8 @@ pub async fn auto_fix(
     let messages = vec![
         ChatMessage::user_text(format!(
             "{}\n\n{}",
-            narrator::NARRATOR_PROMPT,
-            narrator::DELIVERY_CONTRACT
+            settings.narrator_prompt(),
+            settings.delivery_contract()
         )),
         ChatMessage::assistant_text(
             "Understood. Every panel keeps its tag and its own narration, in order.",

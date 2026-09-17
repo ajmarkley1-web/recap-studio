@@ -373,6 +373,12 @@ export interface Settings {
   grounding_check: boolean;
   pages_per_narration: number;
   max_output_tokens: number;
+  /** The user's own narrator prompt. Empty means the shipped default. */
+  narrator_prompt: string;
+  /** The user's own delivery rules. Empty means the shipped default. */
+  delivery_contract: string;
+  /** Ids of mechanical checks switched off. */
+  disabled_rules: string[];
   tts: TtsSettings;
   video: VideoSettings;
   projects_root: string | null;
@@ -410,10 +416,20 @@ export interface FfmpegStatus {
   install_hint: string;
 }
 
-/** The narrator prompt, exactly as the model receives it. */
+/** The engine as the UI shows it: what gets sent, the shipped defaults to
+ *  revert to, and the checks that can be switched on and off. */
 export interface NarratorPromptView {
   prompt: string;
   delivery: string;
+  default_prompt: string;
+  default_delivery: string;
+  prompt_is_custom: boolean;
+  delivery_is_custom: boolean;
+  /** False when a custom delivery text has dropped the [[page:panel]] tags. */
+  delivery_keeps_panel_tags: boolean;
+  /** [id, label] for every mechanical check. */
+  rules: [string, string][];
+  disabled_rules: string[];
 }
 
 export interface RenderResult {
