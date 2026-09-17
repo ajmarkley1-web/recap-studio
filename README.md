@@ -7,6 +7,9 @@ read aloud over the pages.
 Built with Tauri 2 (Rust) and React. It is a remake of the existing legacy
 project.
 
+> **New to this?** [**SETUP.md**](SETUP.md) is a complete step-by-step guide,
+> written for people who have never installed a development tool. Start there.
+
 ---
 
 ## What it does
@@ -112,6 +115,9 @@ on screen for exactly as long as its clip runs.
 ---
 
 ## Running it
+
+If any of this is unfamiliar, use [SETUP.md](SETUP.md) instead — it covers the
+same ground one click at a time.
 
 ```bash
 npm install
