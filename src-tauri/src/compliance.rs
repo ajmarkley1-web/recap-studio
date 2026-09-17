@@ -33,6 +33,9 @@ pub struct Coverage {
     pub out_of_order: Vec<PanelRef>,
     /// Panels whose narration is too thin to be a narration: (panel, words).
     pub thin: Vec<(PanelRef, usize)>,
+    /// Panels whose narration is broken across a blank line instead of running
+    /// as one block.
+    pub split: Vec<PanelRef>,
 }
 
 /// A panel narrated in fewer words than this has been summarized, not narrated.
@@ -72,6 +75,12 @@ impl Coverage {
             .filter(|(_, words)| *words < THIN_PANEL_WORDS)
             .collect();
 
+        let split: Vec<PanelRef> = narrated
+            .iter()
+            .filter(|n| n.text.lines().any(|l| l.trim().is_empty()))
+            .map(|n| n.panel)
+            .collect();
+
         Self {
             expected: expected.to_vec(),
             narrated: narrated_refs,
@@ -79,6 +88,7 @@ impl Coverage {
             unknown,
             out_of_order,
             thin,
+            split,
         }
     }
 
@@ -194,6 +204,17 @@ static OUTRO: Lazy<Regex> = Lazy::new(|| {
 
 /// A tag that survived into the reading copy.
 static LEFTOVER_TAG: Lazy<Regex> = Lazy::new(|| Regex::new(r"\[\[[^\]]*\]\]").unwrap());
+
+/// "No em-dashes." An en-dash and a spaced double hyphen read the same aloud.
+static EM_DASH: Lazy<Regex> = Lazy::new(|| Regex::new(r"[\u{2014}\u{2013}]|\s-{2,}\s").unwrap());
+
+/// "No semicolons."
+static SEMICOLON: Lazy<Regex> = Lazy::new(|| Regex::new(r";").unwrap());
+
+/// A sentence longer than this is hard to say at a natural speaking pace.
+const LONG_SENTENCE_WORDS: usize = 34;
+/// Average sentence length above this stops sounding spoken.
+const SPOKEN_AVG_WORDS: f32 = 24.0;
 
 fn find_lines_with(text: &str, re: &Regex, limit: usize) -> Vec<String> {
     let mut out = Vec::new();
@@ -417,6 +438,106 @@ pub fn check(script: &str, coverage: &Coverage) -> ComplianceReport {
         )
     });
 
+    // --- No em-dashes -------------------------------------------------------
+    let dash_hits = find_lines_with(text, &EM_DASH, 6);
+    let c = Check::pass("no_em_dash", "No em-dashes", DELIVERY, "No em-dashes found.", 10);
+    checks.push(if dash_hits.is_empty() {
+        c
+    } else {
+        c.fail(
+            format!(
+                "{} sentence(s) contain an em-dash, en-dash or double hyphen.",
+                dash_hits.len()
+            ),
+            dash_hits,
+        )
+    });
+
+    // --- No semicolons ------------------------------------------------------
+    let semi_hits = find_lines_with(text, &SEMICOLON, 6);
+    let c = Check::pass("no_semicolon", "No semicolons", DELIVERY, "No semicolons found.", 10);
+    checks.push(if semi_hits.is_empty() {
+        c
+    } else {
+        c.fail(
+            format!("{} sentence(s) contain a semicolon.", semi_hits.len()),
+            semi_hits,
+        )
+    });
+
+    // --- Single flowing block -----------------------------------------------
+    // The reading copy is one paragraph per panel by construction, so "one
+    // block" is checked where it can still mean something: inside a panel.
+    // With no tags at all there is nothing to divide by, so the whole script is
+    // held to the original rule.
+    let c = Check::pass(
+        "single_block",
+        "Single flowing block",
+        DELIVERY,
+        "Each panel runs as one block.",
+        8,
+    );
+    checks.push(if !coverage.narrated.is_empty() {
+        if coverage.split.is_empty() {
+            c
+        } else {
+            c.fail(
+                format!(
+                    "{} panel(s) are broken across a blank line instead of running as one block.",
+                    coverage.split.len()
+                ),
+                label_panels(&coverage.split, 10),
+            )
+        }
+    } else {
+        let paragraphs = text.split("\n\n").filter(|p| !p.trim().is_empty()).count();
+        if paragraphs <= 1 {
+            c
+        } else {
+            c.warn(
+                format!("Untagged script is split into {paragraphs} paragraphs."),
+                Vec::new(),
+            )
+        }
+    });
+
+    // --- Sounds spoken, not written -----------------------------------------
+    let sentences = util::split_sentences(text);
+    let long: Vec<String> = sentences
+        .iter()
+        .filter(|s| util::word_count(s) > LONG_SENTENCE_WORDS)
+        .take(5)
+        .map(|s| util::truncate(s, 240))
+        .collect();
+    let avg = if sentences.is_empty() {
+        0.0
+    } else {
+        util::word_count(text) as f32 / sentences.len() as f32
+    };
+    let c = Check::pass(
+        "spoken_cadence",
+        "Sounds spoken, not written",
+        DELIVERY,
+        format!("Average sentence length {avg:.0} words."),
+        10,
+    );
+    checks.push(if long.is_empty() && avg <= SPOKEN_AVG_WORDS {
+        c
+    } else if long.len() <= 2 && avg <= SPOKEN_AVG_WORDS + 4.0 {
+        c.warn(
+            format!("{} long sentence(s). Average {avg:.0} words.", long.len()),
+            long,
+        )
+    } else {
+        c.fail(
+            format!(
+                "{} sentence(s) are hard to say at a natural speaking pace. Average {avg:.0} words.",
+                long.len()
+            ),
+            long,
+        )
+    });
+
     // --- Enough narration to be worth listening to ---------------------------
     let words = util::word_count(text);
     let per_panel = if narrated == 0 {
@@ -607,12 +728,13 @@ mod tests {
 
     #[test]
     fn expressive_prose_is_not_punished() {
-        // Expressive, atmospheric, long-breathed prose: exactly what the prompt asks
-        // for, and nothing the checks should punish.
-        let script = "The wind came off the rooftop in a long, cold pull, and he let it move \
-                      through him without flinching; the ache in his shoulder had gone quiet, \
-                      which frightened him more than the pain had. Somewhere below, a door \
-                      closed — and then, slowly, deliberately, he began to count.";
+        // Atmospheric, emotional, unhurried prose is exactly what the prompt asks
+        // for. The punctuation rules constrain how it is written, not how rich it
+        // is allowed to be, so none of these checks should fire on it.
+        let script = "The wind came off the rooftop in a long, cold pull, and he let it \
+                      move through him without flinching. The ache in his shoulder had \
+                      gone quiet, which frightened him more than the pain had. Somewhere \
+                      below, a door closed. Slowly, deliberately, he began to count.";
         let report = check(script, &Coverage::default());
         let failures: Vec<&str> = report
             .rules
@@ -630,6 +752,69 @@ mod tests {
             &Coverage::default(),
         );
         assert_eq!(status_of(&report, "no_sign_off"), RuleStatus::Fail);
+    }
+
+    #[test]
+    fn em_dashes_and_semicolons_fail() {
+        let report = check(
+            "He runs on into the dark — fast; and he does not once look back.",
+            &Coverage::default(),
+        );
+        assert_eq!(status_of(&report, "no_em_dash"), RuleStatus::Fail);
+        assert_eq!(status_of(&report, "no_semicolon"), RuleStatus::Fail);
+    }
+
+    #[test]
+    fn an_en_dash_and_a_double_hyphen_count_as_em_dashes() {
+        for sample in ["He waits – then moves.", "He waits -- then moves."] {
+            let report = check(sample, &Coverage::default());
+            assert_eq!(
+                status_of(&report, "no_em_dash"),
+                RuleStatus::Fail,
+                "missed: {sample}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_panel_broken_across_a_blank_line_fails_single_block() {
+        let expected = vec![panel(0, 0)];
+        let narrated = vec![NarratedPanel {
+            panel: panel(0, 0),
+            text: "He steps to the ledge and looks down at the street below.\n\nThen he \
+                   turns back toward the door he came through."
+                .into(),
+        }];
+        let coverage = Coverage::measure(&expected, &narrated);
+        assert_eq!(coverage.split, vec![panel(0, 0)]);
+        let report = check("He steps to the ledge.", &coverage);
+        assert_eq!(status_of(&report, "single_block"), RuleStatus::Fail);
+    }
+
+    #[test]
+    fn one_paragraph_per_panel_is_not_a_single_block_violation() {
+        // This is what strip_markers always produces, so it must not fire.
+        let expected = vec![panel(0, 0), panel(0, 1)];
+        let coverage = Coverage::measure(&expected, &narrated(&[(0, 0), (0, 1)], 30));
+        assert!(coverage.split.is_empty());
+        let report = check("He wakes in the dark.\n\nHe runs for the door.", &coverage);
+        assert_eq!(status_of(&report, "single_block"), RuleStatus::Pass);
+    }
+
+    #[test]
+    fn a_sentence_too_long_to_say_aloud_fails() {
+        let long = format!("He {} ran.", "slowly and ".repeat(20));
+        let report = check(&long, &Coverage::default());
+        assert_eq!(status_of(&report, "spoken_cadence"), RuleStatus::Fail);
+    }
+
+    #[test]
+    fn short_spoken_sentences_pass() {
+        let report = check(
+            "He wakes in the dark. The room is not his. He does not move for a long moment.",
+            &Coverage::default(),
+        );
+        assert_eq!(status_of(&report, "spoken_cadence"), RuleStatus::Pass);
     }
 
     #[test]

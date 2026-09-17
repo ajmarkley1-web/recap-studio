@@ -38,6 +38,10 @@ Before each stretch, write that panel's tag on its own line, exactly as the reco
 
 The tags are the only markup. Everything between them is flowing prose, with no headers, no bullets, no panel numbers spoken aloud in the text, and no labels of any kind. A reader who removes the tags should be left with one continuous story.
 
+Each panel's narration is one unbroken paragraph. Never split a panel across a blank line.
+
+It is written to be read aloud, so the punctuation stays simple. No em-dashes and no semicolons anywhere: where one of those would go, use a comma, or start a new sentence. Keep sentences short enough to say in one breath at a natural speaking pace. Break a long sentence in two rather than stacking clause on clause.
+
 Narration for a panel is at least a couple of full sentences, and as many as the moment needs. A panel that only shows a character's face still has a reaction, a thought and a feeling to narrate. A panel with no dialogue still has a beat of tension, hesitation or atmosphere to carry.
 
 Write it to be read aloud. Do not open with a preamble or close with a sign-off, a summary of what just happened, or any address to the audience. Begin at the first tag and end at the last one."#;

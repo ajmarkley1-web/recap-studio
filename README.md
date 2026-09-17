@@ -69,6 +69,10 @@ before you read a word of it:
 - prose only — no headers, bullets, scene labels or stray tags
 - no preamble, sign-off or closing summary
 - full, immersive length rather than a summary
+- no em-dashes, en-dashes or double hyphens
+- no semicolons
+- each panel's narration runs as one unbroken block
+- sentences short enough to say aloud at a natural pace
 
 Plus a **grounding pass**: an AI check that flags any sentence asserting an event
 the panel record does not support, so an expressive retelling never turns into an
